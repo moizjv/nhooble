@@ -1,0 +1,96 @@
+This project main objective is to write Haskell code for parallel file read and run scotty (Haskells own web framework).
+
+To understand both I have used simple example where we perform following steps :
+
+1. Read html file in parallel
+2. strip html tags
+3. create a dictionary of filename and frequency of words
+4. write a web application to get the query from user
+5. return list of documents with cummilative total count of words in the documents
+6. sort document list at front end using javascript
+
+We will dicuss only important code snippets. You can check entire code out of git.
+
+1. Read html file in parallel
+
+To read html files we give names of files as input to a map function which performs file read. Since we are performing a map operation we can use parMap to perform map operation in parallel with rpar strategy which makes it evaluate eagerly and in parallel
+-------------------------------------------
+-------------------------------------------
+
+--Magical parMap and rpar for performing parallel map read
+readingFilesInParallel :: [[Char]] -> [IO ([Char], [(String, Int)])]
+readingFilesInParallel names = parMap rpar (\x -> do
+					   temp <- readFile $ "docs/" ++ x
+					   return (x, mapper $ stripTags $ temp)) names	
+-------------------------------------------
+--------------------------------------------
+reading file is a trivial code 
+
+
+--Operation of reading files.
+readingFiles :: [[Char]] -> IO [([Char], [(String, Int)])]
+readingFiles []	     = return []
+readingFiles (x:xs)  = do			
+			temp <- readFile $ "docs/" ++ x
+			rest <- readingFiles xs
+			return ((x, mapper $ stripTags $ temp):rest) 
+
+---------------------------------------------
+--------------------------------------------
+
+Now the challenging part is after each file read is performed each element of the list is wrapped in IO monad i.e. it will be [IO a] but it is 
+difficult for us to perform other operations on list if each is wrapped in IO , but we cannot simply unwarp IO and have a list it will be unsafe. So more logical thing to do is wrap entire read file with IO, i.e. [IO a] -> IO [a]. So for future operations we can have simply take the entire list out of IO and perform the operations we need. So to do this we use sequence. 
+------------------------------------
+------------------------------------
+--using sequence which will convert [IO a] to IO [a] i.e. unwraping all file reads and wrapping it together.
+combingReadFiles :: Monad m => [m a] -> m [a]
+combingReadFiles input = sequence input
+------------------------------------
+------------------------------------
+
+Writing web application using scotty is fairly simple.  middleware $ staticPolicy (noDots >-> addBase "js") this line makes folder js to be available for static import at the front end. So in the code we make js, template and imgs folder available and use it at the index.
+
+--------------------------------------------------------------
+--------------------------------------------------------------
+main = scotty 3000 $ do
+  middleware $ staticPolicy (noDots >-> addBase "js")
+  middleware $ staticPolicy (noDots >-> addBase "template")
+  middleware $ staticPolicy (noDots >-> addBase "imgs")		
+------------------------------------------------------------
+--------------------------------------------------------------
+Haskell is a lazy language but its a good idea to create dictionary of [(filename,[(word,frequency)])] at the start of the server (it is executed when first request from the web is made). So below line makes it evaluate when first server call is made and we can reuse tempFileHolder for forthcoming requests.
+-------------------------------------------
+----------------------------------------------
+tempFileHolder <- liftIO readFilesFromDirectory
+--------------------------------------------
+----------------------------------------------
+Writing simple get and post requests is very trivial task and is just like writing impereritive code. 
+Follows a pattern and below is a sample code sippet which performs that
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+get "/" $ do
+    file "index.html"	
+post "/queryResolver2" $ do
+    searchString <- param "field" `rescue` (const next)
+    let temp=calculateFrequecyAndReturnSortedDocuments tempFileHolder searchString    
+    json (temp)
+post "/queryResolver2" $ do
+  json $ object [ "error" .= ("Invalid request" :: String) ]
+  status badRequest400
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+Once we have put all pieces of code together we need to tell ghci to run this program in parallel and specify number of cores required. 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+>ghc MainController.hs  -threaded -rtsopts -O4
+> ./MainController
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+
+Now for this simple psuedo serch engine I have used around 70 static html pages (avg of 20000 words) to perform read operation and create a dictionary, for sake of comparision created same kind of search engine in python. Here is the comparision of performance.
+
+table.
+
+This is originally part of EECS 876 course on Advanced FUnctional Programming thought by Dr. Andy Gill at University of Kansas. I would like to thank Dr.Andy for all the gyan.  

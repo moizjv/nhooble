@@ -1,0 +1,9 @@
+To run this please install GHC and cabal.
+
+Then cabal install scotty,parallel and string util packages. 
+
+Then in 
+>ghci MainController
+>main
+
+
